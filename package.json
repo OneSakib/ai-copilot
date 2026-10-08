@@ -1,0 +1,25 @@
+{
+  "name": "ai-copilot",
+  "version": "0.1.1",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k -n next,app \"next dev -p 3000\" \"wait-on http://localhost:3000 && electron .\"",
+    "backend": "cd backend && uvicorn main:app --host 127.0.0.1 --port 8000"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "concurrently": "^9.1.0",
+    "electron": "^33.2.0",
+    "typescript": "^5.6.0",
+    "wait-on": "^8.0.1"
+  }
+}

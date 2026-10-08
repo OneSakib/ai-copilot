@@ -1,0 +1,7 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+websockets>=13.0
+python-dotenv>=1.0
+langgraph>=0.2.60
+langchain-core>=0.3
+langchain-anthropic>=0.3
