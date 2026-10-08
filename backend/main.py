@@ -2,7 +2,7 @@
 
 Binary frames from the client:  [1 byte channel][PCM16 LE, 16 kHz, mono]
     channel 0 = me (microphone), channel 1 = them (system audio)
-JSON frames from the client:    {"type": "ask"} | {"type": "clear"}
+JSON frames from the client:    {"type": "ask"} | {"type": "clear"} | {"type": "screenshot", "image": <base64 JPEG>}
 """
 import asyncio
 import json
@@ -94,12 +94,12 @@ class Session:
                 {"type": "partial", "speaker": speaker, "text": " ".join(buf)}
             )
 
-    def trigger(self, utterance: str, force: bool) -> None:
+    def trigger(self, utterance: str, force: bool, image: str | None = None) -> None:
         if self.answer_task and not self.answer_task.done():
             self.answer_task.cancel()
-        self.answer_task = asyncio.create_task(self.run_graph(utterance, force))
+        self.answer_task = asyncio.create_task(self.run_graph(utterance, force, image))
 
-    async def run_graph(self, utterance: str, force: bool) -> None:
+    async def run_graph(self, utterance: str, force: bool, image: str | None = None) -> None:
         rid = uuid.uuid4().hex[:8]
         started = False
         state = {
@@ -108,6 +108,8 @@ class Session:
             "context": config.load_context(),
             "force": force,
         }
+        if image:
+            state["image"] = image
         try:
             async for chunk, meta in graph.astream(state, stream_mode="messages"):
                 if meta.get("langgraph_node") != "answer":
@@ -139,6 +141,12 @@ class Session:
                 (t["text"] for t in reversed(self.transcript) if t["speaker"] == "them"), ""
             )
             self.trigger(last_them, force=True)
+        elif kind == "screenshot":
+            image = msg.get("image") or ""
+            if 0 < len(image) < 8_000_000:  # ~6 MB of JPEG
+                self.trigger("Screenshot", force=True, image=image)
+            else:
+                await self.send({"type": "error", "message": "Screenshot was empty or too large."})
         elif kind == "clear":
             self.transcript.clear()
 

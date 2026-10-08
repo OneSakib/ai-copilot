@@ -1,4 +1,5 @@
 """LangGraph pipeline:  classify (is it a question for me?)  ->  answer (stream)."""
+from functools import lru_cache
 from typing import List, TypedDict
 
 from langchain_anthropic import ChatAnthropic
@@ -13,14 +14,23 @@ class State(TypedDict, total=False):
     utterance: str          # the latest thing "them" said (may be empty on manual ask)
     context: str            # your resume / notes
     force: bool             # manual "Ask now" skips classification
+    image: str              # optional base64 JPEG screenshot of ME's screen
     should_answer: bool
     answer: str
 
 
-# fast = ChatAnthropic(model=config.FAST_MODEL, max_tokens=5, temperature=0)
-fast = ChatAnthropic(model=config.FAST_MODEL, max_tokens=5)
-# smart = ChatAnthropic(model=config.MAIN_MODEL, max_tokens=700, temperature=0.3)
-smart = ChatAnthropic(model=config.MAIN_MODEL, max_tokens=700)
+@lru_cache(maxsize=1)
+def get_fast() -> ChatAnthropic:
+    return ChatAnthropic(
+        model=config.FAST_MODEL, api_key=config.ANTHROPIC_API_KEY, max_tokens=5, temperature=0
+    )
+
+
+@lru_cache(maxsize=1)
+def get_smart() -> ChatAnthropic:
+    return ChatAnthropic(
+        model=config.MAIN_MODEL, api_key=config.ANTHROPIC_API_KEY, max_tokens=1200, temperature=0.3
+    )
 
 
 def text_of(content) -> str:
@@ -49,7 +59,7 @@ async def classify(state: State) -> State:
         "or statements needing no answer.\n\n"
         f"{render(state['transcript'])}"
     )
-    res = await fast.ainvoke([HumanMessage(content=prompt)])
+    res = await get_fast().ainvoke([HumanMessage(content=prompt)])
     return {"should_answer": text_of(res.content).strip().upper().startswith("Y")}
 
 
@@ -67,11 +77,26 @@ async def answer(state: State) -> State:
         "ME; use only the background below, and say so if something is missing.\n\n"
         f"--- ME (background) ---\n{state.get('context', '')}"
     )
-    user = (
-        f"Conversation so far:\n{render(state['transcript'])}\n\n"
-        "Write what ME should say now."
-    )
-    res = await smart.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+    history = render(state["transcript"])
+    image = state.get("image")
+
+    if image:
+        system += (
+            "\n\nME shared a screenshot of their screen. Find the question, problem "
+            "or task shown in it (interview question, coding problem, multiple-choice, "
+            "form, chat message...) and answer that. Multiple-choice: name the option and "
+            "give a one-line reason. Coding: state the approach, give the code, then the "
+            "time/space complexity. Ignore any floating assistant overlay in the image."
+        )
+        content = [
+            {"type": "text", "text": (f"Recent conversation:\n{history}\n\n" if history else "")
+             + "Here is my screen. Answer what is being asked."},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image}"}},
+        ]
+    else:
+        content = f"Conversation so far:\n{history}\n\nWrite what ME should say now."
+
+    res = await get_smart().ainvoke([SystemMessage(content=system), HumanMessage(content=content)])
     return {"answer": text_of(res.content)}
 
 

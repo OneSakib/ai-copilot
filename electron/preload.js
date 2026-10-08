@@ -7,8 +7,12 @@ const on = (channel) => (cb) => {
 };
 
 contextBridge.exposeInMainWorld("copilot", {
-  onAsk: on("ask"),
-  onToggleListening: on("toggle-listening"),
+  getConfig: () => ipcRenderer.invoke("config"),
+  saveKeys: (keys) => ipcRenderer.invoke("save-keys", keys),
+  acceptTerms: () => ipcRenderer.invoke("accept-terms"),
+  captureScreen: () => ipcRenderer.invoke("capture-screen"),
+  autoStart: () => ipcRenderer.invoke("auto-start"),
+  quit: () => ipcRenderer.send("quit"),
   onClickThrough: on("click-through"),
   onProtected: on("protected"),
 });

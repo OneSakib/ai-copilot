@@ -150,3 +150,28 @@ button:focus-visible { outline: 2px solid var(--me); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   .card.streaming { animation: none; }
 }
+
+/* ---- first-run panels ---- */
+.panel { padding: 22px 20px; overflow-y: auto; }
+.panel h1 { margin: 0 0 10px; font-size: 18px; font-weight: 650; }
+.panel p { margin: 0 0 12px; color: var(--dim); max-width: 44ch; }
+.panel label { display: block; margin: 0 0 12px; font-size: 12.5px; color: var(--dim); }
+.panel input {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font: 13px ui-monospace, "SF Mono", Consolas, monospace;
+}
+.panel .row { display: flex; gap: 8px; margin-top: 14px; }
+.panel .hint { font-size: 12px; }
+button:disabled { opacity: 0.4; cursor: default; }
+.centered { margin: auto; }
+
+.askrow { display: flex; gap: 8px; margin-top: 12px; }
+
+.keys .bad { color: var(--bad); text-decoration: line-through; }

@@ -1,8 +1,26 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://127.0.0.1:8000/ws";
-export const HTTP_URL = WS_URL.replace(/^ws/, "http").replace(/\/ws$/, "");
+export type AppConfig = {
+  wsUrl: string;
+  httpUrl: string;
+  platform: string;
+  hasKeys: boolean;
+  accepted: boolean;
+  shortcuts: { label: string; keys: string; ok: boolean }[];
+  shortcutFailures: string[];
+};
+
+const ENV_WS = process.env.NEXT_PUBLIC_WS_URL ?? "ws://127.0.0.1:8000/ws";
+const FALLBACK: AppConfig = {
+  wsUrl: ENV_WS,
+  httpUrl: ENV_WS.replace(/^ws/, "http").replace(/\/ws$/, ""),
+  platform: "web",
+  hasKeys: true,
+  accepted: true,
+  shortcuts: [],
+  shortcutFailures: [],
+};
 
 export type Speaker = "me" | "them";
 export type Line = { id: number; speaker: Speaker; text: string };
@@ -12,20 +30,28 @@ export type Status = "idle" | "connecting" | "listening" | "error";
 declare global {
   interface Window {
     copilot?: {
-      onAsk: (cb: () => void) => () => void;
-      onToggleListening: (cb: () => void) => () => void;
+      getConfig: () => Promise<AppConfig>;
+      saveKeys: (k: { anthropic: string; deepgram: string }) => Promise<AppConfig>;
+      acceptTerms: () => Promise<AppConfig>;
+      autoStart: () => Promise<void>;
+      captureScreen: () => Promise<string>;
+      quit: () => void;
       onClickThrough: (cb: (on: boolean) => void) => () => void;
       onProtected: (cb: (on: boolean) => void) => () => void;
     };
+    __copilot?: { start: () => void; stop: () => void; toggle: () => void; ask: () => void; screenshot: () => void };
   }
 }
 
 export function useCopilot() {
+  const [cfg, setCfg] = useState<AppConfig | null>(null);
+  const cfgRef = useRef<AppConfig>(FALLBACK);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
   const [partials, setPartials] = useState<Partial<Record<Speaker, string>>>({});
   const [answers, setAnswers] = useState<Answer[]>([]);
+  const [pending, setPending] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -54,6 +80,7 @@ export function useCopilot() {
         setLines((l) => [...l.slice(-40), { id: ++idRef.current, speaker: m.speaker, text: m.text }]);
         break;
       case "answer_start":
+        setPending(false);
         setAnswers((a) => [...a.slice(-5), { id: m.id, trigger: m.trigger, text: "", done: false }]);
         break;
       case "answer_delta":
@@ -63,6 +90,7 @@ export function useCopilot() {
         setAnswers((a) => a.map((x) => (x.id === m.id ? { ...x, done: true } : x)));
         break;
       case "error":
+        setPending(false);
         setError(m.message);
         break;
     }
@@ -91,12 +119,13 @@ export function useCopilot() {
     setError("");
     setStatus("connecting");
     try {
-      const ws = new WebSocket(WS_URL);
+      const wsUrl = cfgRef.current.wsUrl;
+      const ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
       wsRef.current = ws;
       await new Promise<void>((res, rej) => {
         ws.onopen = () => res();
-        ws.onerror = () => rej(new Error(`Can't reach the backend at ${WS_URL}. Is it running?`));
+        ws.onerror = () => rej(new Error(`Can't reach the backend at ${wsUrl}. Is it running?`));
       });
       ws.onmessage = (e) => handle(JSON.parse(e.data));
       ws.onclose = () => {
@@ -115,7 +144,7 @@ export function useCopilot() {
       const sysTracks = display.getAudioTracks();
       mediaRef.current = [mic, display];
       if (!sysTracks.length) {
-        throw new Error("No system audio. Grant Screen Recording permission to Electron and use macOS 13+.");
+        throw new Error("No system audio was captured. On Mac, allow Screen Recording (macOS 13+). On Windows, make sure sound is playing through your default output device.");
       }
 
       attach(ctx, mic, 0, ws);
@@ -132,23 +161,69 @@ export function useCopilot() {
     wsRef.current?.send(JSON.stringify({ type: "ask" }));
   }, []);
 
+  const screenshot = useCallback(async () => {
+    if (!window.copilot) {
+      setError("Screenshots work in the desktop app.");
+      return;
+    }
+    try {
+      const image = await window.copilot.captureScreen(); // grab the screen first, before any UI change
+      if (!wsRef.current) await start();
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("Not connected to the backend.");
+      setPending(true);
+      ws.send(JSON.stringify({ type: "screenshot", image }));
+    } catch (e: any) {
+      setPending(false);
+      setError(e?.message ?? String(e));
+    }
+  }, [start]);
+
   const clear = useCallback(() => {
     setLines([]);
     setAnswers([]);
     wsRef.current?.send(JSON.stringify({ type: "clear" }));
   }, []);
 
-  // Global shortcuts coming from Electron
+  // Load config from Electron (or fall back to env when running in a plain browser)
   useEffect(() => {
-    const off1 = window.copilot?.onAsk(ask);
-    const off2 = window.copilot?.onToggleListening(() => (wsRef.current ? stop() : start()));
-    return () => {
-      off1?.();
-      off2?.();
+    const load = window.copilot ? window.copilot.getConfig() : Promise.resolve(FALLBACK);
+    load.then((c) => {
+      cfgRef.current = c;
+      setCfg(c);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (cfg) cfgRef.current = cfg;
+  }, [cfg]);
+
+  // Electron triggers these through executeJavaScript(..., userGesture=true)
+  useEffect(() => {
+    window.__copilot = {
+      start: () => void start(),
+      stop,
+      toggle: () => (wsRef.current ? stop() : void start()),
+      ask,
+      screenshot: () => void screenshot(),
     };
-  }, [ask, start, stop]);
+  }, [start, stop, ask, screenshot]);
+
+  const saveKeys = useCallback(
+    async (k: { anthropic: string; deepgram: string }) => {
+      stop();
+      const next = await window.copilot?.saveKeys(k);
+      if (next) setCfg(next);
+    },
+    [stop]
+  );
+
+  const acceptTerms = useCallback(async () => {
+    const next = await window.copilot?.acceptTerms();
+    if (next) setCfg(next);
+  }, []);
 
   useEffect(() => stop, [stop]);
 
-  return { status, error, lines, partials, answers, start, stop, ask, clear };
+  return { cfg, status, error, lines, partials, answers, pending, start, stop, ask, screenshot, clear, saveKeys, acceptTerms };
 }
