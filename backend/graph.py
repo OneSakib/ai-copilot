@@ -29,7 +29,7 @@ def get_fast() -> ChatAnthropic:
 @lru_cache(maxsize=1)
 def get_smart() -> ChatAnthropic:
     return ChatAnthropic(
-        model=config.MAIN_MODEL, api_key=config.ANTHROPIC_API_KEY, max_tokens=1200, temperature=0.3
+        model=config.MAIN_MODEL, api_key=config.ANTHROPIC_API_KEY, max_tokens=1200
     )
 
 
