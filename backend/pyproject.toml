@@ -4,4 +4,13 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastapi>=0.115",
+    "langchain-anthropic>=0.3",
+    "langchain-core>=0.3",
+    "langgraph>=0.2.60",
+    "pyinstaller>=6.10",
+    "python-dotenv>=1.0",
+    "uvicorn[standard]>=0.30",
+    "websockets>=13.0",
+]
